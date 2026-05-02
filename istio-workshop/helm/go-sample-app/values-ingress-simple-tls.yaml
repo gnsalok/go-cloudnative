@@ -1,0 +1,5 @@
+istio:
+  tls:
+    enabled: true
+    mode: SIMPLE
+    credentialName: go-app-tls

@@ -1,3 +1,29 @@
 image:
   repository: go-sample-app
   tag: v1
+  pullPolicy: IfNotPresent
+
+frontend:
+  replicaCount: 1
+  servicePort: 8080
+  version: v1
+  backendURL: ""
+
+backend:
+  replicaCount: 1
+  servicePort: 8080
+  version: v1
+
+curlClient:
+  enabled: true
+  image: curlimages/curl:8.7.1
+
+istio:
+  enabled: true
+  mtlsStrict: true
+  host: example.com
+  ingressGatewaySelector: ingressgateway
+  tls:
+    enabled: true
+    mode: SIMPLE
+    credentialName: go-app-tls

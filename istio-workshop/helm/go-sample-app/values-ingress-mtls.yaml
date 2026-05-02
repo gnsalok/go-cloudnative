@@ -1,0 +1,5 @@
+istio:
+  tls:
+    enabled: true
+    mode: MUTUAL
+    credentialName: go-app-mtls

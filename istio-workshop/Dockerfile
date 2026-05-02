@@ -1,10 +1,14 @@
-FROM golang:1.19.6-buster AS build
-WORKDIR /app
-COPY . .
-RUN go build -o app main.go
+FROM golang:1.22.4-alpine AS build
+WORKDIR /src
 
-FROM gcr.io/distroless/base-debian11
-WORKDIR /root/
-COPY --from=build /app/app .
+COPY go-sample-app/go.mod ./go.mod
+COPY go-sample-app/main.go ./main.go
+
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/app ./main.go
+
+FROM gcr.io/distroless/static-debian12
+WORKDIR /app
+COPY --from=build /out/app /app/app
+
 EXPOSE 8080
-CMD ["./app"]
+ENTRYPOINT ["/app/app"]

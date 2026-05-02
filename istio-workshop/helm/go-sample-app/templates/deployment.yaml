@@ -1,22 +1,119 @@
+{{- $fullName := include "go-sample-app.fullname" . -}}
+{{- $backendHost := printf "http://%s-backend.%s.svc.cluster.local:%v/" $fullName .Release.Namespace .Values.backend.servicePort -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}
+  name: {{ $fullName }}-frontend
+  labels:
+    {{- include "go-sample-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: {{ .Values.frontend.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "go-sample-app.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: frontend
+  template:
+    metadata:
+      labels:
+        {{- include "go-sample-app.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: frontend
+    spec:
+      containers:
+      - name: frontend
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        env:
+        - name: APP_ROLE
+          value: frontend
+        - name: VERSION
+          value: {{ .Values.frontend.version | quote }}
+        - name: BACKEND_URL
+          value: {{ default $backendHost .Values.frontend.backendURL | quote }}
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullName }}-backend
+  labels:
+    {{- include "go-sample-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  replicas: {{ .Values.backend.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "go-sample-app.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: backend
+  template:
+    metadata:
+      labels:
+        {{- include "go-sample-app.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: backend
+    spec:
+      containers:
+      - name: backend
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        env:
+        - name: APP_ROLE
+          value: backend
+        - name: VERSION
+          value: {{ .Values.backend.version | quote }}
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+{{- if .Values.curlClient.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullName }}-curl
+  labels:
+    {{- include "go-sample-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: curl-client
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: {{ .Release.Name }}
+      {{- include "go-sample-app.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: curl-client
   template:
     metadata:
       labels:
-        app: {{ .Release.Name }}
+        {{- include "go-sample-app.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: curl-client
     spec:
       containers:
-      - name: go-sample-app
-        image: go-sample-app:{{ .Values.image.tag | default "v1" }}
-        ports:
-        - containerPort: 8080
-        env:
-        - name: APP_VERSION
-          value: "{{ .Values.image.tag | default "v1" }}"
+      - name: curl
+        image: {{ .Values.curlClient.image | quote }}
+        command: ["/bin/sh", "-c", "sleep infinity"]
+{{- end }}

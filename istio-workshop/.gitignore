@@ -1,0 +1,9 @@
+# Generated certificate artifacts
+/docs/certs/out/
+
+# Private key material (defense in depth)
+*.key
+*.pem
+
+# Common local build/cache artifacts
+.gocache/

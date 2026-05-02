@@ -1,32 +1,68 @@
-apiVersion: networking.istio.io/v1beta1
+{{- if .Values.istio.enabled }}
+{{- $fullName := include "go-sample-app.fullname" . -}}
+apiVersion: networking.istio.io/v1
 kind: Gateway
 metadata:
-  name: go-app-gateway
-  namespace: go-app
+  name: {{ $fullName }}-gateway
 spec:
   selector:
-    istio: ingressgateway
+    istio: {{ .Values.istio.ingressGatewaySelector }}
   servers:
   - port:
       number: 80
       name: http
       protocol: HTTP
     hosts:
-    - "myexample.com"
+    - {{ .Values.istio.host | quote }}
+    {{- if .Values.istio.tls.enabled }}
+    tls:
+      httpsRedirect: true
+    {{- end }}
+  {{- if .Values.istio.tls.enabled }}
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    hosts:
+    - {{ .Values.istio.host | quote }}
+    tls:
+      mode: {{ .Values.istio.tls.mode }}
+      credentialName: {{ .Values.istio.tls.credentialName | quote }}
+  {{- end }}
 ---
-apiVersion: networking.istio.io/v1beta1
+apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
-  name: go-app-vs
-  namespace: go-app
+  name: {{ $fullName }}-frontend
 spec:
   hosts:
-  - "myexample.com"
+  - {{ .Values.istio.host | quote }}
   gateways:
-  - go-app-gateway
+  - {{ $fullName }}-gateway
   http:
   - route:
     - destination:
-        host: go1.go-app.svc.cluster.local
+        host: {{ $fullName }}-frontend.{{ .Release.Namespace }}.svc.cluster.local
         port:
-          number: 8080
+          number: {{ .Values.frontend.servicePort }}
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: {{ $fullName }}-backend-istio-mtls
+spec:
+  host: {{ $fullName }}-backend.{{ .Release.Namespace }}.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+{{- if .Values.istio.mtlsStrict }}
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+spec:
+  mtls:
+    mode: STRICT
+{{- end }}
+{{- end }}
