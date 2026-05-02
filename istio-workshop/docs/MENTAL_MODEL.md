@@ -52,6 +52,44 @@ Client -- mTLS --> Istio Ingress Gateway ---- HTTP ----> frontend sidecar -> fro
 - Client also presents `client.crt/client.key`.
 - Gateway verifies client certificate against trusted CA (`ca.crt` key in secret).
 
+## 2.1 Beginner walkthrough: certs, secrets, and handshake
+
+Think of this as three boxes:
+
+- Client box (your `curl` command).
+- Ingress gateway box (Istio Envoy at cluster edge).
+- App box (frontend service inside cluster).
+
+Now map certs/secrets to those boxes:
+
+- `go-app-tls` secret in `istio-system`: contains `tls.crt` + `tls.key`; used by ingress gateway to prove server identity to client.
+- `go-app-mtls` secret in `istio-system`: contains `tls.crt` + `tls.key` + `ca.crt`; `tls.crt/tls.key` are server identity, `ca.crt` is trusted client CA for verification.
+- Local client files: `server-ca.crt` is used by `curl --cacert` to trust gateway server cert; `client.crt/client.key` are used by `curl --cert/--key` only in MUTUAL mode.
+
+SIMPLE mode handshake (server auth only):
+
+1. Client connects to gateway over HTTPS.
+2. Gateway sends cert from `go-app-tls` (`tls.crt`).
+3. Client verifies that cert using `server-ca.crt`.
+4. If valid, encrypted channel is established.
+5. Request is routed to frontend service.
+
+MUTUAL mode handshake (both sides auth):
+
+1. Client connects to gateway over HTTPS.
+2. Gateway sends server cert (`tls.crt`) as above.
+3. Gateway also asks client to send certificate.
+4. Client sends `client.crt` and proves key ownership with `client.key`.
+5. Gateway verifies client cert against trusted CA in secret key `ca.crt` (`go-app-mtls`).
+6. If both validations pass, request is accepted and routed to frontend service.
+
+Failure mapping (common beginner confusion):
+
+- If `credentialName` is wrong or secret missing in `istio-system`: TLS listener fails or handshake fails.
+- If client uses wrong `--cacert`: `unable to get local issuer certificate`.
+- If gateway is `MUTUAL` but client does not send `--cert/--key`: handshake rejected.
+- If ingress service has no endpoints: connection refused/timeouts before TLS starts.
+
 ## 3) Who issues which certificate?
 
 There are two independent issuers in this demo:
@@ -89,3 +127,42 @@ kubectl -n istio-system get secret go-app-mtls
 ```bash
 kubectl -n istio-system get endpoints istio-ingressgateway
 ```
+
+## 6) Helm chart mental model (what each file does)
+
+Chart root:
+
+- `helm/go-sample-app/Chart.yaml`: chart metadata and version (`name`, `version`, `appVersion`).
+- `helm/go-sample-app/values.yaml`: default config for image, frontend/backend, curl client, and Istio flags (`host`, `tls.mode`, `credentialName`, `mtlsStrict`).
+- `helm/go-sample-app/values-ingress-simple-tls.yaml`: override to force ingress mode `SIMPLE`.
+- `helm/go-sample-app/values-ingress-mtls.yaml`: override to force ingress mode `MUTUAL`.
+
+Templates:
+
+- `helm/go-sample-app/templates/_helpers.tpl`: reusable name and label helpers for consistent object naming.
+- `helm/go-sample-app/templates/deployment.yaml`: creates frontend/backend deployments and optional curl test deployment.
+- `helm/go-sample-app/templates/service.yaml`: creates frontend/backend ClusterIP services.
+- `helm/go-sample-app/templates/istio-gateway.yaml`: creates `Gateway`, `VirtualService`, `DestinationRule`, and optional `PeerAuthentication` for mesh/ingress security behavior.
+
+How to think about rendering:
+
+- Base install uses `values.yaml` (SIMPLE TLS by default).
+- Add `-f values-ingress-mtls.yaml` when you want client cert auth at ingress.
+- The same app workloads stay the same; only gateway TLS behavior changes.
+
+
+## 7) Deployment and Service mental model
+
+Traffic flow:
+
+1. Client (or gateway) calls service DNS, e.g. goapp-go-sample-app-frontend.go-app.svc.cluster.local:8080.
+2. Kubernetes Service picks one matching frontend Pod.
+3. Inside frontend Pod, app handles request.
+4. For /call-backend, frontend app calls backend service DNS.
+5. Backend Service routes to one backend Pod.
+
+Why this is useful:
+
+- Pods can restart/change IPs; Service DNS stays stable.
+- Scaling Deployments (replicas) automatically adds/removes service endpoints.
+- Istio routing objects target Services, not individual Pod IPs, so traffic policy remains stable.
