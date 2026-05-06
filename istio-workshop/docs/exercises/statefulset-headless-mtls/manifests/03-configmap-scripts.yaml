@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mtls-demo-scripts
+  namespace: stateful-mtls
+data:
+  generate-pod-cert.sh: |
+    #!/bin/sh
+    set -eu
+
+    : "${POD_NAME:?POD_NAME is required}"
+    : "${POD_NAMESPACE:?POD_NAMESPACE is required}"
+    : "${HEADLESS_SERVICE:?HEADLESS_SERVICE is required}"
+
+    POD_FQDN="${POD_NAME}.${HEADLESS_SERVICE}.${POD_NAMESPACE}.svc.cluster.local"
+
+    cat > /certs/req.cnf <<CONFIG
+    [req]
+    prompt = no
+    distinguished_name = dn
+    req_extensions = v3_req
+
+    [dn]
+    CN = ${POD_FQDN}
+
+    [v3_req]
+    basicConstraints = CA:FALSE
+    keyUsage = critical, digitalSignature, keyEncipherment
+    extendedKeyUsage = serverAuth, clientAuth
+    subjectAltName = @alt_names
+
+    [alt_names]
+    DNS.1 = ${POD_NAME}
+    DNS.2 = ${POD_NAME}.${HEADLESS_SERVICE}
+    DNS.3 = ${POD_NAME}.${HEADLESS_SERVICE}.${POD_NAMESPACE}
+    DNS.4 = ${POD_NAME}.${HEADLESS_SERVICE}.${POD_NAMESPACE}.svc
+    DNS.5 = ${POD_FQDN}
+    CONFIG
+
+    openssl genrsa -out /certs/tls.key 2048
+
+    openssl req \
+      -new \
+      -key /certs/tls.key \
+      -out /certs/tls.csr \
+      -config /certs/req.cnf
+
+    openssl x509 \
+      -req \
+      -in /certs/tls.csr \
+      -CA /ca/ca.crt \
+      -CAkey /ca/ca.key \
+      -CAcreateserial \
+      -out /certs/tls.crt \
+      -days 365 \
+      -sha256 \
+      -extensions v3_req \
+      -extfile /certs/req.cnf
+
+    cp /ca/ca.crt /certs/ca.crt
+
+  run-server.sh: |
+    #!/bin/sh
+    set -eu
+
+    : "${POD_NAME:?POD_NAME is required}"
+
+    echo "[${POD_NAME}] starting mTLS server on :8443"
+
+    exec openssl s_server \
+      -accept 8443 \
+      -cert /certs/tls.crt \
+      -key /certs/tls.key \
+      -CAfile /certs/ca.crt \
+      -Verify 1 \
+      -verify_return_error \
+      -quiet

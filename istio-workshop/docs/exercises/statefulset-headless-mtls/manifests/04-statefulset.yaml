@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mtls-demo
+  namespace: stateful-mtls
+spec:
+  serviceName: mtls-demo-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: mtls-demo
+  template:
+    metadata:
+      labels:
+        app: mtls-demo
+    spec:
+      initContainers:
+        - name: cert-init
+          image: alpine/openssl:3.5.6
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "/scripts/generate-pod-cert.sh"]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: HEADLESS_SERVICE
+              value: mtls-demo-headless
+          volumeMounts:
+            - name: certs
+              mountPath: /certs
+            - name: scripts
+              mountPath: /scripts
+            - name: ca
+              mountPath: /ca
+      containers:
+        - name: mtls-server
+          image: alpine/openssl:3.5.6
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "/scripts/run-server.sh"]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          ports:
+            - name: tls
+              containerPort: 8443
+          readinessProbe:
+            tcpSocket:
+              port: 8443
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          volumeMounts:
+            - name: certs
+              mountPath: /certs
+              readOnly: true
+            - name: scripts
+              mountPath: /scripts
+      volumes:
+        - name: certs
+          emptyDir: {}
+        - name: scripts
+          configMap:
+            name: mtls-demo-scripts
+            defaultMode: 0555
+        - name: ca
+          secret:
+            secretName: mtls-demo-ca
